@@ -1,170 +1,178 @@
-import React, { useState, useContext, useRef } from 'react';
-import { AuthContext } from '../contexts/AuthContext';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
+import axios from 'axios';
 import financeImg from '../assets/finance.jpeg';
 
 export default function RegisterPage() {
-  const navigate = useNavigate();
-  const { register } = useContext(AuthContext);
-
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    password: '',
-  });
-
-  const [showOtp, setShowOtp] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
-  const [serverOtp, setServerOtp] = useState('');
-  const [step, setStep] = useState(1); // 1: Enter Info, 2: Enter OTP
-  const [loading, setLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
   const [message, setMessage] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const otpRef = useRef(null);
+ const handleSendOtp = async () => {
+  if (!email) return setMessage('Please enter your email.');
 
-  const sendOtp = async () => {
+  try {
+    setLoading(true);
+
+    // 🔍 First check if email is already registered
+    const check = await axios.post('http://localhost:5000/api/auth/check-email', { email });
+    if (check.data.exists) {
+      setMessage('This email is already registered. Please log in.');
+      setLoading(false);
+      return;
+    }
+
+    // ✅ If not registered, send OTP
+    const res = await axios.post('http://localhost:5000/api/auth/send-otp', { email });
+
+    if (res.data.success) {
+      setOtpSent(true);
+      setMessage('OTP sent to your email.');
+    } else {
+      setMessage('Failed to send OTP.');
+    }
+  } catch (error) {
+    console.error(error);
+    setMessage('Error checking email or sending OTP.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+  const handleRegister = async () => {
+    if (!name || !email || !password || !otp) {
+      return setMessage('All fields including OTP are required.');
+    }
+
     try {
       setLoading(true);
-      const res = await fetch('http://localhost:5000/api/auth/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email }),
+      const res = await axios.post('http://localhost:5000/api/auth/register-with-otp', {
+        name,
+        email,
+        password,
+        otp,
       });
-      const data = await res.json();
-      if (data.success) {
-        setServerOtp(data.otp);
-        setShowOtp(true);
-        setStep(2);
-        setMessage('OTP sent to your email');
+
+      if (res.data.success) {
+        setMessage('Registration successful! You can now log in.');
+        setName('');
+        setEmail('');
+        setPassword('');
+        setOtp('');
+        setOtpSent(false);
       } else {
-        setMessage(data.message);
+        setMessage(res.data.message || 'Registration failed.');
       }
-    } catch (err) {
-      console.error(err);
-      setMessage('Failed to send OTP');
+    } catch (error) {
+      console.error(error);
+      setMessage(error.response?.data?.message || 'Error during registration.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOtpSubmit = async (e) => {
-    e.preventDefault();
-    if (otp === serverOtp) {
-      try {
-        setLoading(true);
-        await register(formData.name, formData.email, formData.password);
-        setMessage('Registration successful!');
-        navigate('/');
-      } catch (err) {
-        setMessage('Registration failed');
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setMessage('Invalid OTP');
-    }
-  };
-
-  const handleInputChange = (e) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  };
-
-  const togglePassword = () => {
-    setShowPassword(prev => !prev);
-  };
-
   return (
-    <div className="min-h-screen flex">
-      {/* Left Panel */}
-      <div className="flex flex-col justify-center items-center w-full md:w-1/2 px-8">
-        <h2 className="text-3xl font-bold mb-4">Register to FinTrack</h2>
-        <p className="text-gray-600 mb-6">Track your finances smarter</p>
+    <div className="flex flex-col min-h-screen bg-gradient-to-br from-white to-indigo-100 dark:from-gray-900 dark:to-gray-900">
+      {/* Header */}
+      <header className="w-full flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-md">
+        <h1 className="text-xl font-bold text-indigo-600 dark:text-indigo-300">FinTrack</h1>
+      </header>
 
-        <form
-          onSubmit={step === 1 ? (e) => { e.preventDefault(); sendOtp(); } : handleOtpSubmit}
-          className="w-full max-w-md space-y-4"
-        >
-          {step === 1 && (
-            <>
+      <div className="flex flex-1 w-full">
+        {/* Left Form */}
+        <div className="w-full md:w-2/3 flex flex-col justify-center bg-transparent px-8 sm:px-16 md:px-24">
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg w-full">
+            <h2 className="text-3xl font-bold text-indigo-600 dark:text-indigo-300 mb-6 text-center">
+              Create Account
+            </h2>
+
+            <div className="space-y-5">
               <input
                 type="text"
-                name="name"
-                placeholder="Name"
-                required
-                value={formData.name}
-                onChange={handleInputChange}
-                className="w-full border px-4 py-2 rounded-md focus:outline-none focus:ring"
+                placeholder="Full Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
               />
+
               <input
                 type="email"
-                name="email"
-                placeholder="Email"
-                required
-                value={formData.email}
-                onChange={handleInputChange}
-                className="w-full border px-4 py-2 rounded-md focus:outline-none focus:ring"
+                placeholder="Email Address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
               />
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  placeholder="Password"
-                  required
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="w-full border px-4 py-2 rounded-md focus:outline-none focus:ring"
-                />
-                <button
-                  type="button"
-                  onClick={togglePassword}
-                  className="absolute top-2 right-3 text-sm text-gray-500"
-                >
-                  {showPassword ? 'Hide' : 'Show'}
-                </button>
-              </div>
-            </>
-          )}
 
-          {step === 2 && (
-            <>
-              <input
-                type="text"
-                placeholder="Enter OTP"
-                value={otp}
-                ref={otpRef}
-                onChange={(e) => setOtp(e.target.value)}
-                className="w-full border px-4 py-2 rounded-md focus:outline-none focus:ring"
-              />
-            </>
-          )}
+              <button
+                onClick={handleSendOtp}
+                disabled={loading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-semibold"
+              >
+                {loading ? 'Sending OTP...' : 'Send OTP'}
+              </button>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition"
-          >
-            {loading ? 'Processing...' : step === 1 ? 'Send OTP' : 'Register'}
-          </button>
+              {otpSent && (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Enter OTP"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  />
 
-          {message && <p className="text-center text-sm text-red-500">{message}</p>}
-        </form>
+                  <input
+                    type="password"
+                    placeholder="Create Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  />
 
-        <p className="mt-4 text-sm text-gray-600">
-          Already have an account?{' '}
-          <Link to="/" className="text-blue-600 hover:underline">
-            Login
-          </Link>
-        </p>
-      </div>
+                  <button
+                    onClick={handleRegister}
+                    disabled={loading}
+                    className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-semibold"
+                  >
+                    {loading ? 'Registering...' : 'Register'}
+                  </button>
+                </>
+              )}
 
-      {/* Right Panel */}
-      <div className="hidden md:block md:w-1/2">
-        <img
-          src={financeImg}
-          alt="Finance Visual"
-          className="object-cover w-full h-full"
-        />
+              {message && (
+                <p className="text-red-500 text-sm text-center mt-2">{message}</p>
+              )}
+
+              <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-2">
+                Already have an account?{' '}
+                <Link to="/login" className="text-indigo-600 hover:underline">
+                  Login
+                </Link>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Info Panel */}
+        <div className="hidden md:flex flex-col justify-center items-center w-1/3 bg-transparent p-10 space-y-4">
+          <div className="bg-white/30 dark:bg-white/10 backdrop-blur-lg p-4 rounded-2xl shadow-lg">
+            <img
+              src={financeImg}
+              alt="FinTrack"
+              className="w-44 h-auto rounded-xl shadow-xl transform transition-transform duration-300 hover:scale-105 hover:rotate-1"
+            />
+          </div>
+          <h3 className="text-xl font-bold text-indigo-700 dark:text-white">Join FinTrack Today</h3>
+          <ul className="list-disc list-inside text-[16px] text-gray-700 dark:text-gray-300 space-y-2 font-semibold">
+            <li>Track expenses & savings</li>
+            <li>Simple, secure onboarding</li>
+            <li>Smart budget planning</li>
+          </ul>
+        </div>
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo,useContext } from "react";
+import React, { useState, useEffect, useMemo, useContext } from "react";
 import { Bar, Pie } from "react-chartjs-2";
 import useAxios from '../hooks/useAxios';
 import { AuthContext } from '../contexts/AuthContext';
+import { useNavigate } from "react-router-dom";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,8 +12,8 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import jsPDF from "jspdf";
-import "jspdf-autotable";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 ChartJS.register(
   CategoryScale,
@@ -43,7 +44,7 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export default function DashboardPage() {
   // States
   const axios = useAxios();
-  const { user, logout } = useContext(AuthContext);
+  const { user, token, logout } = useContext(AuthContext);
   const [expenses, setExpenses] = useState(() => {
     // Load from localStorage if needed
     const stored = localStorage.getItem("expenses");
@@ -54,6 +55,8 @@ export default function DashboardPage() {
     return stored ? Number(stored) : 0;
   });
   const [budgetInput, setBudgetInput] = useState(budget || "");
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
   const [filterText, setFilterText] = useState("");
   const [showAnalysis, setShowAnalysis] = useState(true);
   const [darkMode, setDarkMode] = useState(() => {
@@ -89,14 +92,6 @@ export default function DashboardPage() {
   // Monthly expenses for bar chart (for current month)
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
-  const monthlyExpensesForChart = useMemo(() => {
-    return expenses
-      .filter((e) => {
-        const d = new Date(e.date);
-        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-      })
-      .reduce((sum, e) => sum + e.amount, 0);
-  }, [expenses, currentMonth, currentYear]);
 
   // Category distribution for pie chart
   const categoryDistribution = useMemo(() => {
@@ -134,7 +129,7 @@ export default function DashboardPage() {
   }, [darkMode]);
 
   // Handlers
-  function handleAddExpense(e) {
+  async function handleAddExpense(e) {
     e.preventDefault();
 
     const amountNum = parseFloat(amountInput);
@@ -148,25 +143,49 @@ export default function DashboardPage() {
       return;
     }
 
-    setExpenses((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        title: titleInput.trim(),
-        amount: amountNum,
-        category: categoryInput,
-        date: dateInput,
-      },
-    ]);
-    setTitleInput("");
-    setAmountInput("");
-    setCategoryInput("Other");
-    setDateInput(todayStr());
+    try {
+      const res = await axios.post(
+        'http://localhost:5000/api/expenses',
+        {
+          title: titleInput.trim(),
+          amount: amountNum,
+          category: categoryInput,
+          date: dateInput,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      // Add to local state after backend confirms save
+      setExpenses((prev) => [...prev, res.data]);
+
+      // Reset form
+      setTitleInput("");
+      setAmountInput("");
+      setCategoryInput("Other");
+      setDateInput(todayStr());
+    } catch (err) {
+      console.error("Failed to add expense:", err);
+      alert("Failed to save expense. Please try again.");
+    }
   }
 
-  function handleDelete(id) {
-    if (window.confirm("Delete this expense?")) {
-      setExpenses((prev) => prev.filter((e) => e.id !== id));
+  async function handleDelete(id) {
+    if (!window.confirm("Delete this expense?")) return;
+
+    try {
+      await axios.delete(`http://localhost:5000/api/expenses/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      setExpenses((prev) => prev.filter((e) => e._id !== id)); // use _id from backend
+    } catch (err) {
+      console.error("Failed to delete:", err);
+      alert("Failed to delete expense.");
     }
   }
 
@@ -180,7 +199,7 @@ export default function DashboardPage() {
   });
 
   function startEdit(expense) {
-    setEditExpenseID(expense.id);
+    setEditExpenseID(expense._id);
     setEditFields({
       title: expense.title,
       amount: expense.amount.toString(),
@@ -199,7 +218,7 @@ export default function DashboardPage() {
     });
   }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     const amountNum = parseFloat(editFields.amount);
     if (
       !editFields.title.trim() ||
@@ -211,20 +230,31 @@ export default function DashboardPage() {
       return;
     }
 
-    setExpenses((prev) =>
-      prev.map((e) =>
-        e.id === id
-          ? {
-              ...e,
-              title: editFields.title.trim(),
-              amount: amountNum,
-              category: editFields.category,
-              date: editFields.date,
-            }
-          : e
-      )
-    );
-    cancelEdit();
+    try {
+      const res = await axios.put(
+        `http://localhost:5000/api/expenses/${id}`,
+        {
+          title: editFields.title.trim(),
+          amount: amountNum,
+          category: editFields.category,
+          date: editFields.date,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      // ✅ Update just the edited expense in state
+      setExpenses((prev) =>
+        prev.map((e) => (e._id === id ? res.data : e))
+      );
+      cancelEdit();
+    } catch (err) {
+      console.error("Failed to update:", err);
+      alert("Failed to save changes.");
+    }
   }
 
   function handleExportPDF() {
@@ -238,21 +268,15 @@ export default function DashboardPage() {
     doc.text(`Total Expenses: $${totalExpenses.toFixed(2)}`, 14, 40);
     doc.text(`Remaining Budget: $${remainingBudget.toFixed(2)}`, 14, 48);
 
-    // Expenses Table
     const tableColumn = ["Title", "Category", "Amount", "Date"];
-    const tableRows = [];
+    const tableRows = expenses.map((expense) => [
+      expense.title,
+      expense.category,
+      `$${expense.amount.toFixed(2)}`,
+      new Date(expense.date).toLocaleDateString(),
+    ]);
 
-    expenses.forEach((expense) => {
-      const expenseData = [
-        expense.title,
-        expense.category,
-        `$${expense.amount.toFixed(2)}`,
-        new Date(expense.date).toLocaleDateString(),
-      ];
-      tableRows.push(expenseData);
-    });
-
-    doc.autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 55,
@@ -275,19 +299,45 @@ export default function DashboardPage() {
     a.click();
     URL.revokeObjectURL(url);
   }
+  const monthlyExpensesForChart = useMemo(() => {
+    const grouped = {}; // { "Jul 2025": 1000, "Jun 2025": 700, ... }
+
+    expenses.forEach((e) => {
+      const date = new Date(e.date);
+      const label = date.toLocaleString("default", { month: "short", year: "numeric" });
+
+      if (!grouped[label]) grouped[label] = 0;
+      grouped[label] += e.amount;
+    });
+
+    // Sort by month/year
+    const sortedLabels = Object.keys(grouped).sort((a, b) => {
+      const [aMonth, aYear] = a.split(" ");
+      const [bMonth, bYear] = b.split(" ");
+      const aDate = new Date(`${aMonth} 1, ${aYear}`);
+      const bDate = new Date(`${bMonth} 1, ${bYear}`);
+      return aDate - bDate;
+    });
+
+    return {
+      labels: sortedLabels,
+      data: sortedLabels.map((label) => grouped[label]),
+    };
+  }, [expenses]);
 
   // Chart.js data
   const barData = {
-    labels: [`${new Date(currentYear, currentMonth).toLocaleString("default", { month: "short" })} ${currentYear}`],
+    labels: monthlyExpensesForChart.labels,
     datasets: [
       {
         label: "Monthly Expenses",
-        data: [monthlyExpensesForChart],
+        data: monthlyExpensesForChart.data,
         backgroundColor: darkMode ? "rgba(100, 149, 237, 0.7)" : "rgba(54, 162, 235, 0.7)",
         borderRadius: 4,
       },
     ],
   };
+
 
   const pieData = {
     labels: categories,
@@ -307,6 +357,34 @@ export default function DashboardPage() {
       },
     ],
   };
+  useEffect(() => {
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    const fetchData = async () => {
+      try {
+        console.log("Token:", token);
+        const res = await axios.get('http://localhost:5000/api/expenses', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        setExpenses(res.data);
+      } catch (err) {
+        console.error(err);
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          logout(); // auto logout on invalid token
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [token, navigate, logout]);
+
 
   const toggleDarkMode = () => setDarkMode((d) => !d);
 
@@ -328,6 +406,51 @@ export default function DashboardPage() {
           color: ${darkMode ? "#e0e0e0" : "#121212"};
           transition: background-color 0.3s, color 0.3s;
         }
+          .container {
+  width: 100%;
+  max-width: 1200px; /* Optional: prevent it from being too wide on desktops */
+  margin: 0 auto;
+  padding: 1rem;
+}
+  body, html {
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+.container, main {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+  .expense-list {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.expense-list table {
+  min-width: 600px; /* or any width that fits your columns */
+  width: 100%;
+  border-collapse: collapse;
+}
+  .charts-container {
+  display: flex;
+  // flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 2rem;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.chart-wrapper {
+  overflow-x: auto;           /* enables horizontal scroll */
+  padding-bottom: 1rem;
+}
+
+.chart-wrapper canvas {
+  min-width: 300px;           /* ensures chart does not shrink too much */
+  max-width: 100%;
+}
         a {
           cursor: pointer;
           transition: color 0.2s;
@@ -340,68 +463,100 @@ export default function DashboardPage() {
           cursor: pointer;
         }
         /* Navbar */
-        nav {
-          position: sticky;
-          top: 0;
-          background-color: ${darkMode ? "#1f1f1f" : "#fff"};
-          box-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0 1rem;
-          height: 56px;
-          z-index: 100;
-          border-bottom: 1px solid ${darkMode ? "#333" : "#ddd"};
-        }
-        nav .brand {
-          font-weight: 700;
-          font-size: 1.3rem;
-          color: ${darkMode ? "#0ef" : "#06f"};
-          user-select: none;
-        }
-        nav .nav-buttons {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-        nav button, nav select, nav label {
-          background-color: ${darkMode ? "#333" : "#e7e7f0"};
-          border: none;
-          border-radius: 4px;
-          color: ${darkMode ? "#e0e0e0" : "#161616"};
-          padding: 0.4rem 0.8rem;
-          font-weight: 600;
-          font-size: 0.9rem;
-          transition: background-color 0.3s;
-        }
-        nav button:hover, nav select:hover, nav label:hover {
-          background-color: ${darkMode ? "#555" : "#c4c4d2"};
-        }
-        nav label {
-          display: flex;
-          align-items: center;
-          gap: 0.4rem;
-          user-select: none;
-          font-size: 0.9rem;
-        }
-        nav label input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-          cursor: pointer;
-        }
-        nav .logout {
-          color: red;
-          font-weight: 600;
-          background: none;
-          padding: 0;
-          border: none;
-          cursor: pointer;
-          font-size: 0.9rem;
-          margin-left: 1rem;
-        }
-        nav .logout:hover {
-          text-decoration: underline;
-        }
+       nav {
+  top: 0;
+  background-color: ${darkMode ? "#1f1f1f" : "#fff"};
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  z-index: 100;
+  border-bottom: 1px solid ${darkMode ? "#333" : "#ddd"};
+  gap: 0.75rem;
+}
+
+nav .brand {
+  font-weight: 700;
+  font-size: 1.3rem;
+  color: ${darkMode ? "#0ef" : "#06f"};
+  user-select: none;
+  flex: 1 1 100%;
+}
+
+nav .nav-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex: 1 1 100%;
+}
+
+@media (min-width: 768px) {
+  nav {
+    flex-wrap: nowrap;
+  }
+
+  nav .brand {
+    flex: 0 0 auto;
+  }
+
+  nav .nav-buttons {
+    justify-content: flex-end;
+    flex: 1 1 auto;
+  }
+}
+
+nav button,
+nav select,
+nav label {
+  background-color: ${darkMode ? "#333" : "#e7e7f0"};
+  border: none;
+  border-radius: 4px;
+  color: ${darkMode ? "#e0e0e0" : "#161616"};
+  padding: 0.4rem 0.8rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  transition: background-color 0.3s;
+  white-space: nowrap;
+}
+
+nav button:hover,
+nav select:hover,
+nav label:hover {
+  background-color: ${darkMode ? "#555" : "#c4c4d2"};
+}
+
+nav label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  user-select: none;
+  font-size: 0.9rem;
+}
+
+nav label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+nav .logout {
+  color: red;
+  font-weight: 600;
+  background: none;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-left: 0.5rem;
+}
+
+nav .logout:hover {
+  text-decoration: underline;
+}
 
         /* Layout container */
         .container {
@@ -686,11 +841,11 @@ export default function DashboardPage() {
         }
       `}</style>
 
-      <nav>
-        <div className="brand" tabIndex={-1} aria-label="Brand Logo">
+      <nav className="flex flex-col sm:flex-row justify-between items-center gap-4 px-4 py-3 bg-white dark:bg-gray-800 shadow-md">
+        <div className="brand text-xl font-bold text-indigo-600 dark:text-indigo-300">
           Workik AI
         </div>
-        <div className="nav-buttons">
+        <div className="nav-buttons flex flex-wrap items-center gap-3 justify-center sm:justify-end">
           <button onClick={handleExportPDF} title="Export expense report PDF" aria-label="Export PDF">
             Export PDF
           </button>
@@ -714,18 +869,18 @@ export default function DashboardPage() {
             />
             Dark Mode
           </label>
-         <h1 className="text-3xl font-bold text-gray-800">Welcome, {user?.name}</h1>
-        <button
-          onClick={logout}
-          className="text-red-600 hover:text-red-800 font-semibold"
-        >
-          Logout
-        </button>
+          <h1 className="text-3xl font-bold text-red-800">Welcome, {user?.name}</h1>
+          <button
+            onClick={logout}
+            className="text-red-600 hover:text-red-800 font-semibold"
+          >
+            Logout
+          </button>
 
         </div>
       </nav>
 
-      <main className="container" role="main">
+      <main className="container mx-auto px-4 sm:px-6 py-6 space-y-8" role="main">
         {/* Budget Section */}
         <section className="budget-section" aria-labelledby="budget-heading">
           <h2 id="budget-heading">Set Your Budget</h2>
@@ -741,8 +896,9 @@ export default function DashboardPage() {
             }}
             aria-label="Set budget form"
           >
-            <div className="budget-input-group">
+            <div className="budget-input-group flex flex-col sm:flex-row gap-3">
               <input
+                className="w-full sm:w-1/2 px-3 py-2 rounded border dark:bg-gray-800"
                 type="number"
                 min="0"
                 step="0.01"
@@ -752,7 +908,7 @@ export default function DashboardPage() {
                 aria-required="true"
                 aria-describedby="budget-helptext"
               />
-              <button type="submit" aria-label="Save budget">Save Budget</button>
+              <button className="w-full sm:w-auto bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition">Save Budget</button>
             </div>
             <div id="budget-helptext" style={{ fontSize: "0.9rem", marginTop: "0.3rem", userSelect: "text" }}>
               Current budget: <strong>${budget.toFixed(2)}</strong>
@@ -845,9 +1001,9 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {filteredExpenses.map((exp) => (
-                  <tr key={exp.id}>
+                  <tr key={exp._id}>
                     <td>
-                      {editExpenseID === exp.id ? (
+                      {editExpenseID === exp._id ? (
                         <input
                           className="edit-input"
                           type="text"
@@ -862,7 +1018,7 @@ export default function DashboardPage() {
                       )}
                     </td>
                     <td>
-                      {editExpenseID === exp.id ? (
+                      {editExpenseID === exp._id ? (
                         <select
                           className="edit-input"
                           value={editFields.category}
@@ -882,7 +1038,7 @@ export default function DashboardPage() {
                       )}
                     </td>
                     <td>
-                      {editExpenseID === exp.id ? (
+                      {editExpenseID === exp._id ? (
                         <input
                           className="edit-input"
                           type="number"
@@ -899,7 +1055,7 @@ export default function DashboardPage() {
                       )}
                     </td>
                     <td>
-                      {editExpenseID === exp.id ? (
+                      {editExpenseID === exp._id ? (
                         <input
                           className="edit-input"
                           type="date"
@@ -915,11 +1071,11 @@ export default function DashboardPage() {
                       )}
                     </td>
                     <td className="actions" aria-label="Expense actions">
-                      {editExpenseID === exp.id ? (
+                      {editExpenseID === exp._id ? (
                         <>
                           <a
                             href="#!"
-                            onClick={() => saveEdit(exp.id)}
+                            onClick={() => saveEdit(exp._id)}
                             aria-label="Save edits"
                           >
                             Save
@@ -945,7 +1101,7 @@ export default function DashboardPage() {
                           <a
                             href="#!"
                             className="delete"
-                            onClick={() => handleDelete(exp.id)}
+                            onClick={() => handleDelete(exp._id)}
                             aria-label={`Delete expense ${exp.title}`}
                           >
                             Delete

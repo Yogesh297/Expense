@@ -2,11 +2,11 @@ import Expense from '../models/Expense.js';
 
 export const getExpenses = async (req, res) => {
   try {
-    const expenses = await Expense.find({ user: req.user }).sort({ date: -1 });
+    const expenses = await Expense.find({ userId: req.userId });
     res.json(expenses);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ msg: 'Error loading expenses' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to fetch expenses' });
   }
 };
 
@@ -19,6 +19,7 @@ export const addExpense = async (req, res) => {
       user: req.user,
       title: title.trim(),
       amount,
+      userId: req.userId,
       category: category || 'Other',
       date: date ? new Date(date) : Date.now(),
     });
@@ -36,7 +37,7 @@ export const updateExpense = async (req, res) => {
     const expense = await Expense.findById(req.params.id);
     if (!expense) return res.status(404).json({ msg: 'Expense not found' });
 
-    if (expense.user.toString() !== req.user)
+    if (expense.userId.toString() !== req.userId)
       return res.status(401).json({ msg: 'Unauthorized' });
 
     const { title, amount, category, date } = req.body;
@@ -56,12 +57,16 @@ export const updateExpense = async (req, res) => {
 export const deleteExpense = async (req, res) => {
   try {
     const expense = await Expense.findById(req.params.id);
-    if (!expense) return res.status(404).json({ msg: 'Expense not found' });
 
-    if (expense.user.toString() !== req.user)
-      return res.status(401).json({ msg: 'Unauthorized' });
+    if (!expense) {
+      return res.status(404).json({ msg: 'Expense not found' });
+    }
 
-    await expense.remove();
+    if (expense.userId.toString() !== req.userId) {
+      return res.status(403).json({ msg: 'Unauthorized to delete this expense' });
+    }
+
+    await expense.deleteOne();
     res.json({ msg: 'Expense deleted' });
   } catch (error) {
     console.error(error);

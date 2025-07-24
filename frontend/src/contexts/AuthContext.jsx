@@ -1,43 +1,44 @@
-import React, { createContext, useState, useEffect } from 'react';
+import { createContext, useEffect, useState } from 'react';
 import axios from 'axios';
 
 export const AuthContext = createContext();
 
-const API_URL = 'http://localhost:5000/api/auth';
-
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(() => {
+    const storedUser = localStorage.getItem('user');
+    return storedUser ? JSON.parse(storedUser) : null;
+  });
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-    if (token && userData) setUser(JSON.parse(userData));
-    setLoading(false);
-  }, []);
+  const [token, setToken] = useState(() => localStorage.getItem('token') || '');
 
+  // Handle login
   const login = async (email, password) => {
-    const res = await axios.post(`${API_URL}/login`, { email, password });
-    setUser(res.data.user);
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem('user', JSON.stringify(res.data.user));
+    const res = await axios.post('http://localhost:5000/api/auth/login', {
+      email,
+      password,
+    });
+
+    const { token, user } = res.data;
+
+    // Save to localStorage
+    localStorage.setItem('token', token);
+    localStorage.setItem('user', JSON.stringify(user));
+
+    // Set state
+    setToken(token);
+    setUser(user);
   };
 
-  const register = async (name, email, password) => {
-    const res = await axios.post(`${API_URL}/register`, { name, email, password });
-    setUser(res.data.user);
-    localStorage.setItem('token', res.data.token);
-    localStorage.setItem('user', JSON.stringify(res.data.user));
-  };
-
+  // Handle logout
   const logout = () => {
-    setUser(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    setToken('');
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
