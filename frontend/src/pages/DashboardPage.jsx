@@ -145,7 +145,7 @@ export default function DashboardPage() {
 
     try {
       const res = await axios.post(
-        'http://localhost:5000/api/expenses',
+        'https://expense-1myv.onrender.com/api/expenses',
         {
           title: titleInput.trim(),
           amount: amountNum,
@@ -177,7 +177,7 @@ export default function DashboardPage() {
     if (!window.confirm("Delete this expense?")) return;
 
     try {
-      await axios.delete(`http://localhost:5000/api/expenses/${id}`, {
+      await axios.delete(`https://expense-1myv.onrender.com/api/expenses/${id}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -366,7 +366,7 @@ export default function DashboardPage() {
     const fetchData = async () => {
       try {
         console.log("Token:", token);
-        const res = await axios.get('http://localhost:5000/api/expenses', {
+        const res = await axios.get('https://expense-1myv.onrender.com/api/expenses', {
           headers: {
             Authorization: `Bearer ${token}`,
           },
