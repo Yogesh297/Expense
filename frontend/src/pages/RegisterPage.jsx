@@ -19,7 +19,7 @@ export default function RegisterPage() {
     setLoading(true);
 
     // 🔍 First check if email is already registered
-    const check = await axios.post('http://localhost:5000/api/auth/check-email', { email });
+    const check = await axios.post('https://expense-1myv.onrender.com/api/auth/check-email', { email });
     if (check.data.exists) {
       setMessage('This email is already registered. Please log in.');
       setLoading(false);
@@ -27,7 +27,7 @@ export default function RegisterPage() {
     }
 
     // ✅ If not registered, send OTP
-    const res = await axios.post('http://localhost:5000/api/auth/send-otp', { email });
+    const res = await axios.post('https://expense-1myv.onrender.com/api/auth/send-otp', { email });
 
     if (res.data.success) {
       setOtpSent(true);
@@ -50,7 +50,7 @@ export default function RegisterPage() {
 
     try {
       setLoading(true);
-      const res = await axios.post('http://localhost:5000/api/auth/register-with-otp', {
+      const res = await axios.post('https://expense-1myv.onrender.com/api/auth/register-with-otp', {
         name,
         email,
         password,
